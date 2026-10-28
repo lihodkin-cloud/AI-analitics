@@ -1,0 +1,3 @@
+function init() {
+  MailApp.getRemainingDailyQuota();
+}
