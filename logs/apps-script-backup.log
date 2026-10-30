@@ -1,0 +1,30 @@
+2026-10-30 10:04:52 [INFO] ========================================
+2026-10-30 10:04:52 [INFO] GKD Apps Script backup started
+2026-10-30 10:04:52 [INFO] Repository: E:\Projects-ChatGPT
+2026-10-30 10:04:52 [INFO] Current branch: main
+2026-10-30 10:04:52 [WARNING] Local repository contains uncommitted changes.
+2026-10-30 10:04:52 [WARNING]  M backup-appsscript.ps1 ?? .apps-script-backup.lock ?? logs/
+2026-10-30 10:04:52 [WARNING] Backup cancelled to protect local work.
+2026-10-30 10:04:52 [INFO] GKD Apps Script backup finished.
+2026-10-30 10:04:52 [INFO] ========================================
+2026-10-30 10:12:02 [INFO] ========================================
+2026-10-30 10:12:02 [INFO] GKD Apps Script backup started
+2026-10-30 10:12:02 [INFO] Repository: E:\Projects-ChatGPT
+2026-10-30 10:12:02 [INFO] Current branch: main
+2026-10-30 10:12:02 [INFO] Executing: git fetch origin
+2026-10-30 10:12:03 [INFO] Executing: git checkout apps-script-backup
+2026-10-30 10:12:03 [INFO] Updating remote backup branch.
+2026-10-30 10:12:03 [INFO] Executing: git pull --ff-only origin apps-script-backup
+2026-10-30 10:12:04 [INFO] Pulling current Apps Script HEAD.
+2026-10-30 10:12:04 [INFO] Executing: clasp pull
+2026-10-30 10:12:07 [INFO] Apps Script changes detected:
+2026-10-30 10:12:07 [CHANGE] ?? .apps-script-backup.lock
+2026-10-30 10:12:07 [CHANGE] ?? logs/
+2026-10-30 10:12:07 [INFO] Executing: git add .
+2026-10-30 10:12:07 [INFO] Executing: git commit -m Automatic Apps Script backup 2026-10-30 10:12:07
+2026-10-30 10:12:07 [INFO] Executing: git push -u origin apps-script-backup
+2026-10-30 10:12:09 [INFO] Backup successfully pushed to GitHub.
+2026-10-30 10:12:09 [INFO] Branch: apps-script-backup
+2026-10-30 10:12:09 [INFO] Returned to branch: main
+2026-10-30 10:12:09 [INFO] GKD Apps Script backup finished.
+2026-10-30 10:12:09 [INFO] ========================================
