@@ -2,3 +2,6 @@
 .clasp.json
 node_modules/
 .env
+
+logs/
+.apps-script-backup.lock
