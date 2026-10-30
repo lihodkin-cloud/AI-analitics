@@ -1,20 +1,29 @@
 $ErrorActionPreference = "Stop"
 
-# ==============================
+# ==========================================
 # НАЛАШТУВАННЯ
-# ==============================
+# ==========================================
 
 $RepoPath = "E:\Projects-ChatGPT"
 $BackupBranch = "apps-script-backup"
 
-$LogDirectory = Join-Path $RepoPath "logs"
-$LogFile = Join-Path $LogDirectory "apps-script-backup.log"
+# Службові файли навмисно зберігаємо ПОЗА Git repository
+$RuntimePath = "E:\Projects-ChatGPT-Backup"
 
-$LockFile = Join-Path $RepoPath ".apps-script-backup.lock"
+$LogFile =
+    Join-Path `
+        $RuntimePath `
+        "apps-script-backup.log"
 
-# ==============================
-# ДОПОМІЖНІ ФУНКЦІЇ
-# ==============================
+$LockFile =
+    Join-Path `
+        $RuntimePath `
+        "apps-script-backup.lock"
+
+
+# ==========================================
+# ЛОГ
+# ==========================================
 
 function Write-Log {
 
@@ -37,6 +46,10 @@ function Write-Log {
 }
 
 
+# ==========================================
+# ЗАПУСК КОМАНДИ З ПЕРЕВІРКОЮ
+# ==========================================
+
 function Invoke-CommandChecked {
 
     param (
@@ -56,27 +69,26 @@ function Invoke-CommandChecked {
     if ($LASTEXITCODE -ne 0) {
 
         throw (
-            "$Command failed " +
-            "with exit code " +
+            "$Command failed with exit code " +
             $LASTEXITCODE
         )
     }
 }
 
 
-# ==============================
-# ПІДГОТОВКА
-# ==============================
+# ==========================================
+# СЛУЖБОВА ПАПКА
+# ==========================================
 
 if (
     -not (
-        Test-Path $LogDirectory
+        Test-Path $RuntimePath
     )
 ) {
 
     New-Item `
         -ItemType Directory `
-        -Path $LogDirectory `
+        -Path $RuntimePath `
         -Force |
         Out-Null
 }
@@ -87,20 +99,20 @@ Write-Log "GKD Apps Script backup started"
 Write-Log "Repository: $RepoPath"
 
 
-# ==============================
-# ЗАХИСТ ВІД ПАРАЛЕЛЬНОГО ЗАПУСКУ
-# ==============================
+# ==========================================
+# LOCK
+# ==========================================
 
 if (
     Test-Path $LockFile
 ) {
 
     Write-Log `
-        "Backup already running or previous run ended incorrectly." `
+        "Another backup instance appears to be running." `
         "ERROR"
 
     Write-Log `
-        "Lock file exists: $LockFile" `
+        "Lock file: $LockFile" `
         "ERROR"
 
     exit 10
@@ -115,13 +127,14 @@ New-Item `
 
 
 $currentBranch = $null
+$backupSucceeded = $false
 
 
 try {
 
-    # ==============================
-    # ПЕРЕХІД У REPOSITORY
-    # ==============================
+    # ==========================================
+    # REPOSITORY
+    # ==========================================
 
     if (
         -not (
@@ -136,9 +149,9 @@ try {
     Set-Location $RepoPath
 
 
-    # ==============================
-    # ПЕРЕВІРКА GIT
-    # ==============================
+    # ==========================================
+    # GIT / CLASP
+    # ==========================================
 
     if (
         -not (
@@ -151,10 +164,6 @@ try {
     }
 
 
-    # ==============================
-    # ПЕРЕВІРКА CLASP
-    # ==============================
-
     if (
         -not (
             Get-Command clasp `
@@ -166,10 +175,6 @@ try {
     }
 
 
-    # ==============================
-    # ПЕРЕВІРКА .git
-    # ==============================
-
     if (
         -not (
             Test-Path (
@@ -178,38 +183,25 @@ try {
         )
     ) {
 
-        throw (
-            "$RepoPath is not a Git repository."
-        )
+        throw "$RepoPath is not a Git repository."
     }
-
-
-    # ==============================
-    # ПЕРЕВІРКА .clasp.json
-    # ==============================
-
-    $ClaspConfig =
-        Join-Path `
-            $RepoPath `
-            ".clasp.json"
 
 
     if (
         -not (
-            Test-Path $ClaspConfig
+            Test-Path (
+                Join-Path $RepoPath ".clasp.json"
+            )
         )
     ) {
 
-        throw (
-            ".clasp.json not found. " +
-            "Cannot identify Apps Script project."
-        )
+        throw ".clasp.json not found."
     }
 
 
-    # ==============================
+    # ==========================================
     # ПОТОЧНА ГІЛКА
-    # ==============================
+    # ==========================================
 
     $currentBranch =
         (
@@ -223,9 +215,7 @@ try {
         )
     ) {
 
-        throw (
-            "Cannot determine current Git branch."
-        )
+        throw "Cannot determine current Git branch."
     }
 
 
@@ -235,9 +225,9 @@ try {
     )
 
 
-    # ==============================
-    # ЗАХИСТ ЛОКАЛЬНОЇ РОБОТИ
-    # ==============================
+    # ==========================================
+    # ЗАХИСТ НЕЗАКОМІЧЕНОЇ РОБОТИ
+    # ==========================================
 
     $localChanges =
         git status --porcelain
@@ -255,21 +245,25 @@ try {
             "Local repository contains uncommitted changes." `
             "WARNING"
 
-        Write-Log `
-            $localChanges `
-            "WARNING"
+        foreach (
+            $change in $localChanges
+        ) {
 
-        Write-Log `
-            "Backup cancelled to protect local work." `
-            "WARNING"
+            Write-Log `
+                $change `
+                "WARNING"
+        }
 
-        exit 20
+
+        throw (
+            "Backup cancelled to protect local work."
+        )
     }
 
 
-    # ==============================
-    # FETCH REMOTE
-    # ==============================
+    # ==========================================
+    # FETCH
+    # ==========================================
 
     Invoke-CommandChecked `
         "git" `
@@ -279,9 +273,9 @@ try {
         )
 
 
-    # ==============================
-    # ЧИ ІСНУЄ BACKUP BRANCH
-    # ==============================
+    # ==========================================
+    # BACKUP BRANCH
+    # ==========================================
 
     $localBackupBranch =
         git branch `
@@ -296,7 +290,7 @@ try {
     ) {
 
         Write-Log (
-            "Creating local backup branch: " +
+            "Creating backup branch: " +
             $BackupBranch
         )
 
@@ -308,7 +302,6 @@ try {
                 "-b",
                 $BackupBranch
             )
-
     }
     else {
 
@@ -321,9 +314,9 @@ try {
     }
 
 
-    # ==============================
-    # ЧИ Є BACKUP BRANCH НА GITHUB
-    # ==============================
+    # ==========================================
+    # REMOTE BACKUP BRANCH
+    # ==========================================
 
     $remoteBackup =
         git ls-remote `
@@ -356,9 +349,9 @@ try {
     }
 
 
-    # ==============================
-    # CLASP PULL
-    # ==============================
+    # ==========================================
+    # APPS SCRIPT → LOCAL
+    # ==========================================
 
     Write-Log (
         "Pulling current Apps Script HEAD."
@@ -372,9 +365,9 @@ try {
         )
 
 
-    # ==============================
+    # ==========================================
     # ПЕРЕВІРКА ЗМІН
-    # ==============================
+    # ==========================================
 
     $appsScriptChanges =
         git status --porcelain
@@ -391,8 +384,8 @@ try {
         )
 
 
-        # Якщо backup-гілки ще немає
-        # на GitHub — створюємо її.
+        # Створюємо remote branch,
+        # якщо вона ще не існує.
 
         if (
             [string]::IsNullOrWhiteSpace(
@@ -401,8 +394,7 @@ try {
         ) {
 
             Write-Log (
-                "Remote backup branch does not exist. " +
-                "Creating it."
+                "Creating remote backup branch."
             )
 
 
@@ -417,85 +409,84 @@ try {
         }
 
 
+        $backupSucceeded = $true
+
+    }
+    else {
+
         Write-Log (
-            "Backup finished. No new commit required."
-        )
-
-        exit 0
-    }
-
-
-    Write-Log (
-        "Apps Script changes detected:"
-    )
-
-
-    foreach (
-        $change in $appsScriptChanges
-    ) {
-
-        Write-Log `
-            $change `
-            "CHANGE"
-    }
-
-
-    # ==============================
-    # COMMIT
-    # ==============================
-
-    Invoke-CommandChecked `
-        "git" `
-        @(
-            "add",
-            "."
+            "Apps Script changes detected:"
         )
 
 
-    $timestamp =
-        Get-Date `
-            -Format "yyyy-MM-dd HH:mm:ss"
+        foreach (
+            $change in $appsScriptChanges
+        ) {
+
+            Write-Log `
+                $change `
+                "CHANGE"
+        }
 
 
-    $commitMessage =
-        "Automatic Apps Script backup $timestamp"
+        # ==========================================
+        # COMMIT
+        # ==========================================
+
+        Invoke-CommandChecked `
+            "git" `
+            @(
+                "add",
+                "."
+            )
 
 
-    Invoke-CommandChecked `
-        "git" `
-        @(
-            "commit",
-            "-m",
-            $commitMessage
+        $timestamp =
+            Get-Date `
+                -Format "yyyy-MM-dd HH:mm:ss"
+
+
+        $commitMessage =
+            "Automatic Apps Script backup $timestamp"
+
+
+        Invoke-CommandChecked `
+            "git" `
+            @(
+                "commit",
+                "-m",
+                $commitMessage
+            )
+
+
+        # ==========================================
+        # PUSH
+        # ==========================================
+
+        Invoke-CommandChecked `
+            "git" `
+            @(
+                "push",
+                "-u",
+                "origin",
+                $BackupBranch
+            )
+
+
+        Write-Log (
+            "Backup successfully pushed to GitHub."
         )
 
 
-    # ==============================
-    # PUSH
-    # ==============================
-
-    Invoke-CommandChecked `
-        "git" `
-        @(
-            "push",
-            "-u",
-            "origin",
+        Write-Log (
+            "Branch: " +
             $BackupBranch
         )
 
 
-    Write-Log (
-        "Backup successfully pushed to GitHub."
-    )
+        $backupSucceeded = $true
+    }
 
-
-    Write-Log (
-        "Branch: " +
-        $BackupBranch
-    )
-
-
-    exit 0
 }
 
 
@@ -508,16 +499,14 @@ catch {
     Write-Log `
         "Backup FAILED." `
         "ERROR"
-
-    exit 1
 }
 
 
 finally {
 
-    # ==============================
-    # ПОВЕРНЕННЯ НА РОБОЧУ ГІЛКУ
-    # ==============================
+    # ==========================================
+    # ПОВЕРНЕННЯ НА ПОЧАТКОВУ ГІЛКУ
+    # ==========================================
 
     try {
 
@@ -539,12 +528,38 @@ finally {
 
 
             if (
-                $nowBranch -ne
-                $currentBranch
+                $nowBranch -ne $currentBranch
             ) {
 
-                git checkout $currentBranch |
-                    Out-Null
+                & git checkout $currentBranch
+
+
+                if ($LASTEXITCODE -ne 0) {
+
+                    throw (
+                        "git checkout $currentBranch failed."
+                    )
+                }
+
+
+                $verifiedBranch =
+                    (
+                        git branch --show-current
+                    ).Trim()
+
+
+                if (
+                    $verifiedBranch -ne
+                    $currentBranch
+                ) {
+
+                    throw (
+                        "Expected branch " +
+                        $currentBranch +
+                        ", actual branch " +
+                        $verifiedBranch
+                    )
+                }
 
 
                 Write-Log (
@@ -562,12 +577,14 @@ finally {
                 $_.Exception.Message
             ) `
             "ERROR"
+
+        $backupSucceeded = $false
     }
 
 
-    # ==============================
-    # ВИДАЛЕННЯ LOCK
-    # ==============================
+    # ==========================================
+    # ВИДАЛЯЄМО LOCK
+    # ==========================================
 
     if (
         Test-Path $LockFile
@@ -584,4 +601,18 @@ finally {
     )
 
     Write-Log "========================================"
+}
+
+
+# ==========================================
+# EXIT CODE ДЛЯ TASK SCHEDULER
+# ==========================================
+
+if ($backupSucceeded) {
+
+    exit 0
+}
+else {
+
+    exit 1
 }
