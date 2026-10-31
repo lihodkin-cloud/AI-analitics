@@ -1,7 +1,7 @@
 /**
- * ГКД — Маршрутні листи 5.1, 18.10.2026
+ * ГКД — Маршрутні листи 5.2, 31.10.2026 (адаптація шаблону МЛ 2.0).
  * Друк: точне копіювання «Шаблон МЛ» у Google Sheets + нативний PDF.
- * Збережені: журнал, 00-000, додаткові МЛ, Д-/Д2- для дублікатів.
+ * Збережені: журнал, 00-000, додаткові МЛ; нові дублікати Д1-/Д2-/Д3-.
  * HTML більше не перетворює макет шаблона на власні таблиці.
  * Без DriveApp: для точного PDF створюється тимчасова Google-таблиця.
  * 5.1: PDF відкривається у Chrome; додаткові МЛ видаються парами (.1 + .2).
@@ -10,7 +10,8 @@
 const ML4 = Object.freeze({
   TASKS:'Завдання', TECH:'Тех.карти', TEMPLATE:'Шаблон МЛ',
   JOURNAL:'Журнал МЛ', FIRST_TASK_ROW:4,
-  REGULAR_FIRST_ROW:1, DUPLICATE_FIRST_ROW:46,
+  REGULAR_FIRST_ROW:1, DUPLICATE_FIRST_ROW:43,
+  REGULAR_TAG_ROW:21, DUPLICATE_TAG_ROW:62,
   PAGE_ROWS:42, PAGE_COLUMNS:8,
   MAX_PRINT_PAGES:90, MAX_EXTRA_PAIRS:15,
   JOURNAL_COLUMNS:21
@@ -135,10 +136,10 @@ function ml4PrepareExtra(dateIso,shiftValue,groupIndex,quantity) {
   return ml5ExportAndBundle_(ss,docs,{warnings:plan.warnings});
 }
 
-/** Дублікат без нової порядкової цифри року; ланцюг Д-, Д2-, Д3-… */
+/** Дублікат без нової порядкової цифри року; новий ланцюг Д1-, Д2-, Д3-… */
 function ml4PrepareDuplicate(code,yearValue){
   const match=String(code||'').trim().toUpperCase().replace(/\s/g,'').match(/^(?:Д\d*-)?(\d\d)-(\d\d\d)$/u);
-  if(!match)throw new Error('Введіть номер, наприклад 12-345 або Д-12-345.');
+  if(!match)throw new Error('Введіть номер, наприклад 12-345 або Д1-12-345.');
   const paper=match[1]+'-'+match[2];
   const yearStr=String(yearValue||'').trim();
   if(yearStr && !/^20\d{2}$/.test(yearStr))throw new Error('Рік первісного МЛ має містити чотири цифри.');
@@ -155,7 +156,7 @@ function ml4PrepareDuplicate(code,yearValue){
     const root=masters[0];
     const ordinal=history.filter(r=>r.type==='Дублікат'&&r.rootYear===root.year&&r.rootPaper===paper)
       .reduce((max,r)=>Math.max(max,r.ordinal),0)+1;
-    const duplicateNumber=(ordinal===1?'Д':'Д'+ordinal)+'-'+paper;
+    const duplicateNumber='Д'+ordinal+'-'+paper;
     const id=root.year+'-'+duplicateNumber;
     if(history.some(r=>r.id===id))throw new Error('Номер дубліката вже існує. Повторіть спробу.');
     doc={
@@ -252,18 +253,32 @@ function ml4Append_(ss,sheet,docs){
  */
 function ml5CheckTemplate_(ss,kind){
   const sheet=ml4MustSheet_(ss,ML4.TEMPLATE);
-  const end=kind==='duplicate'?87:42;
-  if(sheet.getMaxRows()<end||sheet.getMaxColumns()<8){
-    throw new Error('У «Шаблон МЛ» недостатньо рядків або колонок. Потрібні A1:H87.');
+  const isDup=kind==='duplicate';
+  const start=isDup?ML4.DUPLICATE_FIRST_ROW:ML4.REGULAR_FIRST_ROW;
+  const tagRow=isDup?ML4.DUPLICATE_TAG_ROW:ML4.REGULAR_TAG_ROW;
+  const end=start+ML4.PAGE_ROWS-1;
+  if(sheet.getMaxRows()<end||sheet.getMaxColumns()<ML4.PAGE_COLUMNS){
+    throw new Error('У «Шаблон МЛ» недостатньо рядків або колонок. Потрібні A1:H84.');
   }
-  const start=kind==='duplicate'?46:1;
-  const title=sheet.getRange(start,1).getDisplayValue().toUpperCase();
-  if(kind==='duplicate'?!title.includes('ДУБЛІКАТ'):!title.includes('МАРШРУТНИЙ')){
-    throw new Error('Не знайдено заголовок '+kind+' у рядку '+start+' шаблона.');
-  }
-  const tag=sheet.getRange(start+22,1).getDisplayValue().toUpperCase();
-  if(kind==='duplicate'?!tag.includes('ДУБЛІКАТ'):!tag.includes('БИРКА')){
-    throw new Error('Не знайдено відривну бирку в рядку '+(start+22)+' шаблона.');
+  // Перевірка ключових рядків нового макета перед видачею номерів у журналі.
+  const checks=[
+    [start,isDup?'МАРШРУТНОГО ЛИСТА':'МАРШРУТНИЙ ЛИСТ'],
+    [isDup?start+3:start+4,'ФРЕЗЕРУВАННЯ'],
+    [isDup?start+5:start+6,'ШЛІФУВАННЯ'],
+    [tagRow,'БИРК'],
+    [tagRow+3,'ФРЕЗЕРУВАННЯ']
+  ];
+  checks.forEach(pair=>{
+    const actual=sheet.getRange(pair[0],1).getDisplayValue().toUpperCase();
+    if(!actual.includes(pair[1])){
+      throw new Error('Новий «Шаблон МЛ» не відповідає очікуваному макету: рядок '+pair[0]+' (очікується «'+pair[1]+'»). Номери МЛ не видано.');
+    }
+  });
+  if(isDup){
+    if(!sheet.getRange(start,1).getDisplayValue().toUpperCase().includes('ДУБЛІКАТ')||
+       !sheet.getRange(tagRow,1).getDisplayValue().toUpperCase().includes('ДУБЛІКАТ')){
+      throw new Error('Не знайдено заголовки дубліката та його бирки у рядках '+start+' і '+tagRow+'.');
+    }
   }
 }
 function ml5ExportAndBundle_(ss,documents,extras){
@@ -282,21 +297,29 @@ function ml5ExportAndBundle_(ss,documents,extras){
 function ml5PrintFill_(page,doc){
   const parts=String(doc.dateIso).split('-');
   const date=parts[2]+'.'+parts[1]+'.'+parts[0];
+  // У дублікаті бирка починається на один рядок вище відносно початку сторінки.
+  const isDup=doc.type==='Дублікат';
+  const tagHeader=isDup?20:21;      // регулярний: 21, дублікат: 62 -> 20
+  const tagDetails=isDup?21:22;     // регулярний: 22, дублікат: 63 -> 21
+  const millingProduct=isDup?4:5;  // регулярний: 5, дублікат: 46 -> 4
+  const tagProduct=isDup?23:24;    // регулярний: 24, дублікат: 65 -> 23
+  const numberCells=['D1','D'+tagHeader];
+  const dateCells=['A2','A'+tagDetails];
   const mappings=[
-    [['D1','D23'],doc.paper],
-    [['H1','H23','A5','A27'],doc.product],
-    [['A2','A24'],date],
-    [['C2','C24'],doc.shift+' зміна'],
-    [['E2','E24'],doc.pressLabel],
-    [['G2','G24'],doc.mold],
-    [['A3','A25'],doc.operator]
+    [numberCells,doc.paper],
+    [['H1','H'+tagHeader,'C'+millingProduct,'C'+tagProduct],doc.product],
+    [dateCells,date],
+    [['B2','B'+tagDetails],doc.shift+' зміна'],
+    [['C2','C'+tagDetails],doc.pressLabel],
+    [['D2','D'+tagDetails],doc.mold],
+    [['F2','F'+tagDetails],doc.operator]
   ];
-  // Явно вказуємо текстовий формат, щоб 00-001 не перетворився на дату.
-  page.getRangeList(['D1','D23']).setNumberFormat('@');
-  page.getRangeList(['A2','A24']).setNumberFormat('@');
+  // Текстовий формат: 00-001 та Д1-00-001 не перетворюються на дати.
+  page.getRangeList(numberCells).setNumberFormat('@');
+  page.getRangeList(dateCells).setNumberFormat('@');
   mappings.forEach(m=>page.getRangeList(m[0]).setValue(m[1]));
-  // H2/H24 — фізичний екземпляр прес-форми: майстер дописує від руки.
-  // H3/H25 у дублікаті — залишок щитів: майстер вписує сам.
+  // E2 і E21/E22 — екземпляр прес-форми; майстер вписує вручну.
+  // Кількості щитів, деталей, відмітки верстатів і дефектів не заповнюємо.
 }
 function ml5PdfQuery_(){
   return [
@@ -320,9 +343,9 @@ function ml5GenerateNativePdf_(source,documents){
   const base=template.copyTo(temp); // повне копіювання комірок, стилів і об'єднань
   base.setName('__ШАБЛОН_ДЛЯ_ДРУКУ__');
   const isDup=documents[0].type==='Дублікат';
-  const top=isDup?46:1;
+  const top=isDup?ML4.DUPLICATE_FIRST_ROW:ML4.REGULAR_FIRST_ROW;
   const end=top+ML4.PAGE_ROWS-1;
-  // Для дубліката залишаємо лише A46:H87; для звичайного A1:H42.
+  // Для дубліката залишаємо лише A43:H84; для звичайного A1:H42.
   if(base.getMaxRows()>end)base.deleteRows(end+1,base.getMaxRows()-end);
   if(top>1)base.deleteRows(1,top-1);
   if(base.getMaxColumns()>ML4.PAGE_COLUMNS){

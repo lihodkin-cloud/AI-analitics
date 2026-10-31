@@ -1,0 +1,148 @@
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <base target="_blank">
+  <meta charset="UTF-8">
+  <style>
+    *{box-sizing:border-box}
+    body{font:14px Arial,sans-serif;margin:0;padding:20px;color:#24352d;background:#fff}
+    h2{font-size:20px;font-weight:700;margin:0 0 6px}
+    .hint{font-size:12px;color:#58685e;line-height:1.55;margin:7px 0 16px}
+    .fields{display:flex;gap:14px;flex-wrap:wrap;align-items:end}
+    .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+    label{font-weight:600;font-size:13px}
+    input,select{min-height:39px;border:1px solid #b8c9bb;border-radius:5px;background:white;padding:7px 10px;font:14px Arial;color:#24352d}
+    #group{width:520px;max-width:85vw}
+    #sourceCode{width:180px}
+    button{border:0;background:#206c4a;color:white;padding:11px 18px;border-radius:5px;min-height:40px;cursor:pointer;font-weight:bold}
+    button:disabled{background:#b6c4bb;cursor:default}
+    button.secondary{background:#e2eee6;color:#185034;border:1px solid #aac6b4}
+    #message{font-size:14px;line-height:1.6;white-space:pre-wrap;padding-top:16px;min-height:20px}
+    #message.error{color:#b32121}
+    .result{border:1px solid #c4dccb;background:#f5faf6;border-radius:6px;padding:16px;margin-top:14px}
+    .result a{display:inline-block;padding:11px 15px;background:#175f9b;color:white;font-weight:700;border-radius:4px;text-decoration:none;margin:10px 0 6px}
+    .numbers{font-size:13px;color:#304b3c;margin-top:7px;overflow-wrap:anywhere}
+    #extra,#duplicate{display:none}
+  </style>
+</head>
+<body>
+  <h2 id="title">Маршрутні листи</h2>
+  <p class="hint">PDF створюється з оригінального аркуша «Шаблон МЛ». Рамки, шрифти, висота рядків, ширина стовпців і відривна бирка зберігаються як у Google Sheets. Готовий PDF відкривається у новій вкладці Chrome для перегляду й друку. Один МЛ з биркою — одна сторінка А4.</p>
+  <div id="common" class="fields">
+    <div class="field"><label for="day">Дата пресування</label><input type="date" id="day" value="<?= initialToday ?>" onchange="invalidate()"></div>
+    <div class="field"><label for="shift">Зміна</label><select id="shift" onchange="invalidate()"><option value="1">1 зміна</option><option value="2">2 зміна</option></select></div>
+  </div>
+  <div id="extra">
+    <div class="fields">
+      <button type="button" class="secondary" id="list" onclick="loadGroups()">Знайти завдання на зміну</button>
+      <div class="field"><label for="group">Прес (.1 + .2) і виробнича група</label><select id="group"><option value="">Спочатку знайдіть завдання</option></select></div>
+      <div class="field"><label for="quantity">Комплектів (по 2 МЛ)</label><input id="quantity" type="number" value="1" min="1" max="15" style="width:110px"></div>
+    </div>
+  </div>
+  <div id="duplicate">
+    <div class="fields">
+      <div class="field"><label for="code">Номер первісного МЛ</label><input type="text" id="code" placeholder="12-345" maxlength="14"></div>
+      <div class="field"><label for="year">Рік (якщо є неоднозначність)</label><input type="number" id="year" placeholder="необов'язково" min="2020" max="2100" style="width:180px"></div>
+    </div>
+    <p class="hint">Створюється номер Д1-12-345, Д2-12-345 тощо. Кількість щитів, що залишилися, майстер вписує вручну.</p>
+  </div>
+  <div id="pairsInfo" class="hint" style="display:none">Кожний комплект містить два МЛ: один для преса .1, другий — для .2. Наприклад, 4 комплекти = 8 МЛ.</div>
+  <button id="prepare" type="button" onclick="prepare()">Підготувати та відкрити PDF</button>
+  <p class="hint">Увага: номер закріплюється в «Журналі МЛ» перед початком експорту. Після скасування друку номер не використовується повторно. Створення великої кількості сторінок може тривати кілька хвилин.</p>
+  <div id="message" role="status"></div>
+  <div id="result"></div>
+  <script>
+  'use strict';
+  const MODE = <?!= JSON.stringify(initialMode) ?>;
+  let busy=false,loadedFor='';
+  let printTab=null;
+  const $=id=>document.getElementById(id);
+  const titles={shift:'МЛ на зміну',extra:'Додаткові МЛ',duplicate:'Дублікат МЛ'};
+  $('title').textContent=titles[MODE]||'Маршрутні листи';
+  if(MODE==='extra'){$('extra').style.display='block';$('pairsInfo').style.display='block';}
+  if(MODE==='duplicate'){
+    $('duplicate').style.display='block';
+    $('common').style.display='none';
+  }
+  function invalidate(){loadedFor='';if(MODE==='extra')$('group').innerHTML='<option value="">Спочатку знайдіть завдання</option>';}
+  function message(m,err){$('message').textContent=m||'';$('message').className=err?'error':'';}
+  function setBusy(flag,text){busy=flag;$('prepare').disabled=flag;$('prepare').textContent=flag?'Зачекайте…':'Підготувати та відкрити PDF';$('list').disabled=flag;if(text)message(text,false);}
+  function onFailure(e){
+    setBusy(false);
+    if(printTab&&!printTab.closed){
+      try{printTab.close();}catch(ignored){}
+    }
+    printTab=null;
+    message('Помилка: '+((e&&e.message)||String(e)),true);
+  }
+  function openPrintTab(){
+    // Відкриваємо вкладку безпосередньо по кліку, інакше Chrome може
+    // заблокувати спробу з асинхронного withSuccessHandler.
+    printTab=window.open('about:blank','_blank');
+    if(printTab){
+      try{
+        printTab.document.title='Маршрутні листи — готуємо PDF';
+        printTab.document.body.innerHTML='<p style="font:18px Arial;padding:24px">Готуємо PDF із шаблона Google Sheets. Не закривайте цю вкладку…</p>';
+      }catch(ignored){}
+    }
+  }
+  function loadGroups(){
+    if(busy)return;
+    const day=$('day').value,shift=$('shift').value;
+    if(!day)return message('Виберіть дату.',true);
+    setBusy(true,'Зчитую виробничі завдання…');
+    google.script.run.withSuccessHandler(r=>{
+      setBusy(false);
+      const select=$('group');select.innerHTML='';
+      for(const g of r.groups){
+        const opt=document.createElement('option');opt.value=String(g.index);opt.textContent=g.label;select.appendChild(opt);
+      }
+      if(!r.groups.length){loadedFor='';return message('Немає завдань для пресів із заповненими операторами.',true);}
+      loadedFor=day+'|'+shift;
+      message('Знайдено '+r.groups.length+' виробничих груп. Додаткові МЛ для .1 і .2 друкуються одночасно.');
+    }).withFailureHandler(onFailure).ml4ListGroups(day,shift);
+  }
+  function prepare(){
+    if(busy)return;
+    const date=$('day').value,shift=$('shift').value;
+    let method,args;
+    if(MODE==='shift'){
+      if(!date)return message('Виберіть дату.',true);
+      method='ml4PrepareShift';args=[date,shift];
+    }else if(MODE==='extra'){
+      if(loadedFor!==date+'|'+shift)return message('Спочатку натисніть «Знайти завдання на зміну».',true);
+      const group=$('group').value,n=Number($('quantity').value);
+      if(group==='')return message('Виберіть прес і групу.',true);
+      if(!Number.isInteger(n)||n<1||n>15)return message('Кількість комплектів має бути від 1 до 15. Один комплект = два МЛ.',true);
+      method='ml4PrepareExtra';args=[date,shift,Number(group),n];
+    }else{
+      const code=$('code').value.trim();
+      if(!code)return message('Вкажіть номер первісного маршрутного листа.',true);
+      method='ml4PrepareDuplicate';args=[code,$('year').value.trim()];
+    }
+    $('result').textContent='';
+    openPrintTab();
+    setBusy(true,'Видаю номери, копіюю оригінальний шаблон Google Sheets і створюю PDF… Це може тривати кілька хвилин.');
+    google.script.run.withSuccessHandler(r=>{
+      setBusy(false);
+      const caption=MODE==='extra'?'Готово: '+(r.count/2)+' комплектів, '+r.count+' маршрутних листів.':
+        'Готово: '+r.count+' маршрутних листів.';
+      message(caption);
+      // Прямий перехід на PDF. Посилання нижче лишається запасним варіантом.
+      if(printTab&&!printTab.closed){
+        try{printTab.location.replace(r.url);}catch(ignored){}
+      }
+      printTab=null;
+      const block=document.createElement('div');block.className='result';
+      const text=document.createElement('div');text.textContent='Сторінки підготовлено з оригінального шаблона Google Sheets:';block.appendChild(text);
+      const link=document.createElement('a');link.href=r.url;link.target='_blank';link.rel='noopener';link.textContent='Відкрити PDF для друку (якщо вкладка не відкрилася)';block.appendChild(link);
+      const num=document.createElement('div');num.className='numbers';num.textContent='Видані номери: '+(r.numbers||[]).join(', ');block.appendChild(num);
+      if(r.note){const note=document.createElement('p');note.className='hint';note.textContent=r.note;block.appendChild(note);}
+      if(r.warnings&&r.warnings.length){const warn=document.createElement('p');warn.className='hint';warn.textContent='Зауваження щодо техкарт: '+r.warnings.length+'.';block.appendChild(warn);}
+      $('result').appendChild(block);
+    }).withFailureHandler(onFailure)[method](...args);
+  }
+  </script>
+</body>
+</html>
