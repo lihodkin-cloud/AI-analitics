@@ -1,6 +1,6 @@
 /**
- * ГКД — Маршрутні листи 5.2, 31.10.2026 (адаптація шаблону МЛ 2.0).
- * Друк: точне копіювання «Шаблон МЛ» у Google Sheets + нативний PDF.
+ * ГКД — Маршрутні листи 5.3.2 TEST, 18.11.2026 (макет «Копія Шаблон МЛ»).
+ * Друк: точне копіювання «Копія Шаблон МЛ» у Google Sheets + нативний PDF.
  * Збережені: журнал, 00-000, додаткові МЛ; нові дублікати Д1-/Д2-/Д3-.
  * HTML більше не перетворює макет шаблона на власні таблиці.
  * Без DriveApp: для точного PDF створюється тимчасова Google-таблиця.
@@ -8,11 +8,11 @@
  * Потрібно два файли в Apps Script: Code.gs та ML_Dialog.html.
  */
 const ML4 = Object.freeze({
-  TASKS:'Завдання', TECH:'Тех.карти', TEMPLATE:'Шаблон МЛ',
+  TASKS:'Завдання', TECH:'Тех.карти', TEMPLATE:'Копія Шаблон МЛ',
   JOURNAL:'Журнал МЛ', FIRST_TASK_ROW:4,
-  REGULAR_FIRST_ROW:1, DUPLICATE_FIRST_ROW:43,
-  REGULAR_TAG_ROW:21, DUPLICATE_TAG_ROW:62,
-  PAGE_ROWS:42, PAGE_COLUMNS:8,
+  REGULAR_FIRST_ROW:1, DUPLICATE_FIRST_ROW:44,
+  REGULAR_TAG_ROW:22, DUPLICATE_TAG_ROW:64,
+  REGULAR_PAGE_ROWS:43, DUPLICATE_PAGE_ROWS:42, PAGE_COLUMNS:8,
   MAX_PRINT_PAGES:90, MAX_EXTRA_PAIRS:15,
   JOURNAL_COLUMNS:21
 });
@@ -256,9 +256,10 @@ function ml5CheckTemplate_(ss,kind){
   const isDup=kind==='duplicate';
   const start=isDup?ML4.DUPLICATE_FIRST_ROW:ML4.REGULAR_FIRST_ROW;
   const tagRow=isDup?ML4.DUPLICATE_TAG_ROW:ML4.REGULAR_TAG_ROW;
-  const end=start+ML4.PAGE_ROWS-1;
+  const rows=isDup?ML4.DUPLICATE_PAGE_ROWS:ML4.REGULAR_PAGE_ROWS;
+  const end=start+rows-1;
   if(sheet.getMaxRows()<end||sheet.getMaxColumns()<ML4.PAGE_COLUMNS){
-    throw new Error('У «Шаблон МЛ» недостатньо рядків або колонок. Потрібні A1:H84.');
+    throw new Error('У «'+ML4.TEMPLATE+'» недостатньо рядків або колонок. Потрібно щонайменше A1:H85.');
   }
   // Перевірка ключових рядків нового макета перед видачею номерів у журналі.
   const checks=[
@@ -271,7 +272,7 @@ function ml5CheckTemplate_(ss,kind){
   checks.forEach(pair=>{
     const actual=sheet.getRange(pair[0],1).getDisplayValue().toUpperCase();
     if(!actual.includes(pair[1])){
-      throw new Error('Новий «Шаблон МЛ» не відповідає очікуваному макету: рядок '+pair[0]+' (очікується «'+pair[1]+'»). Номери МЛ не видано.');
+      throw new Error('«'+ML4.TEMPLATE+'» не відповідає очікуваному макету: рядок '+pair[0]+' (очікується «'+pair[1]+'»). Номери МЛ не видано.');
     }
   });
   if(isDup){
@@ -279,6 +280,14 @@ function ml5CheckTemplate_(ss,kind){
        !sheet.getRange(tagRow,1).getDisplayValue().toUpperCase().includes('ДУБЛІКАТ')){
       throw new Error('Не знайдено заголовки дубліката та його бирки у рядках '+start+' і '+tagRow+'.');
     }
+  }
+  // Перевіряємо прив'язку маркерів ДО резервування номерів у Журналі МЛ.
+  const markerAnchors=sheet.getImages().map(im=>im.getAnchorCell()).filter(c=>
+    c.getRow()>=start&&c.getRow()<=end&&c.getColumn()>=1&&c.getColumn()<=ML4.PAGE_COLUMNS);
+  if(markerAnchors.length!==2){
+    throw new Error('У діапазоні '+start+':'+end+' аркуша «'+ML4.TEMPLATE+
+      '» потрібно два зображення ArUco, але знайдено '+markerAnchors.length+
+      '. Номери МЛ не видано. Перевірте місця прив’язки маркерів.');
   }
 }
 function ml5ExportAndBundle_(ss,documents,extras){
@@ -297,12 +306,12 @@ function ml5ExportAndBundle_(ss,documents,extras){
 function ml5PrintFill_(page,doc){
   const parts=String(doc.dateIso).split('-');
   const date=parts[2]+'.'+parts[1]+'.'+parts[0];
-  // У дублікаті бирка починається на один рядок вище відносно початку сторінки.
+  // У друкованій окремій вкладці відлік рядків починається з 1.
   const isDup=doc.type==='Дублікат';
-  const tagHeader=isDup?20:21;      // регулярний: 21, дублікат: 62 -> 20
-  const tagDetails=isDup?21:22;     // регулярний: 22, дублікат: 63 -> 21
-  const millingProduct=isDup?4:5;  // регулярний: 5, дублікат: 46 -> 4
-  const tagProduct=isDup?23:24;    // регулярний: 24, дублікат: 65 -> 23
+  const tagHeader=isDup?21:22;      // звичайний: 22, дублікат: 64 -> 21
+  const tagDetails=isDup?22:23;     // звичайний: 23, дублікат: 65 -> 22
+  const millingProduct=isDup?4:5;  // звичайний: 5, дублікат: 47 -> 4
+  const tagProduct=isDup?24:25;    // звичайний: 25, дублікат: 67 -> 24
   const numberCells=['D1','D'+tagHeader];
   const dateCells=['A2','A'+tagDetails];
   const mappings=[
@@ -318,12 +327,12 @@ function ml5PrintFill_(page,doc){
   page.getRangeList(numberCells).setNumberFormat('@');
   page.getRangeList(dateCells).setNumberFormat('@');
   mappings.forEach(m=>page.getRangeList(m[0]).setValue(m[1]));
-  // E2 і E21/E22 — екземпляр прес-форми; майстер вписує вручну.
+  // E2 та E22/E23 — екземпляр прес-форми; майстер вписує вручну.
   // Кількості щитів, деталей, відмітки верстатів і дефектів не заповнюємо.
 }
 function ml5PdfQuery_(){
   return [
-    'format=pdf','size=7','portrait=true','scale=4','fitw=true',
+    'format=pdf','size=A4','portrait=true','scale=4','fitw=true',
     'gridlines=false','sheetnames=false','printtitle=false',
     'pagenum=UNDEFINED','fzr=false','fzc=false',
     'top_margin=0.25','bottom_margin=0.25',
@@ -331,8 +340,40 @@ function ml5PdfQuery_(){
     'attachment=false'
   ].join('&');
 }
+/**
+ * У нативній копії шаблона зображення над комірками можуть НЕ видалитися
+ * разом із рядками: Google Sheets переносить їх у верхню частину аркуша.
+ * Тому перед обрізанням діапазону вилучаємо з копії лише зображення,
+ * які закріплені ПОЗА обраним комплектом МЛ+БМЛ.
+ * Робочий шаблон і оригінальний «Копія Шаблон МЛ» не змінюються.
+ */
+function ml531KeepPageImages_(copiedSheet,firstRow,lastRow){
+  const images=copiedSheet.getImages();
+  const retained=[];
+  const removed=[];
+  images.forEach(image=>{
+    const cell=image.getAnchorCell();
+    const row=cell.getRow(),col=cell.getColumn();
+    if(row<firstRow||row>lastRow||col<1||col>ML4.PAGE_COLUMNS){
+      removed.push(cell.getA1Notation());
+      image.remove();
+    }else{
+      retained.push(cell.getA1Notation());
+    }
+  });
+  Logger.log('Маркери для друку: залишено '+retained.length+' ('+retained.join(', ')+
+             '); вилучено '+removed.length+' ('+removed.join(', ')+')');
+  // Для одного комплекту очікуємо рівно два маркери — МЛ (21) та БМЛ (22).
+  // Перевіряємо до обрізання і до створення PDF, а не видаляємо маркери навмання.
+  if(retained.length!==2){
+    throw new Error('У вибраному діапазоні шаблона '+firstRow+':'+lastRow+
+      ' знайдено '+retained.length+' зображень замість двох маркерів ArUco. '+
+      'Необхідно звірити їхню прив’язку до комірок; PDF не створено.');
+  }
+}
+
 function ml5GenerateNativePdf_(source,documents){
-  // Рідний формат Google Sheets: точна копія «Шаблон МЛ», не HTML-реконструкція.
+  // Рідний формат Google Sheets: копія «Копія Шаблон МЛ», не HTML-реконструкція.
   // Для майстрів немає DriveApp: не потрібен доступ до папки з «ГКД 2026».
   const template=ml4MustSheet_(source,ML4.TEMPLATE);
   const stamp=Utilities.formatDate(new Date(),source.getSpreadsheetTimeZone(),'yyyyMMdd_HHmmss');
@@ -344,14 +385,18 @@ function ml5GenerateNativePdf_(source,documents){
   base.setName('__ШАБЛОН_ДЛЯ_ДРУКУ__');
   const isDup=documents[0].type==='Дублікат';
   const top=isDup?ML4.DUPLICATE_FIRST_ROW:ML4.REGULAR_FIRST_ROW;
-  const end=top+ML4.PAGE_ROWS-1;
-  // Для дубліката залишаємо лише A43:H84; для звичайного A1:H42.
+  const pageRows=isDup?ML4.DUPLICATE_PAGE_ROWS:ML4.REGULAR_PAGE_ROWS;
+  const end=top+pageRows-1;
+  // Спершу видаляємо з КОПІЇ зайві зображення, лише потім рядки.
+  // Інакше маркери від основного МЛ можуть з’явитися над шапкою дубліката.
+  ml531KeepPageImages_(base,top,end);
+  // Для дубліката залишаємо A44:H85; для звичайного A1:H43.
   if(base.getMaxRows()>end)base.deleteRows(end+1,base.getMaxRows()-end);
   if(top>1)base.deleteRows(1,top-1);
   if(base.getMaxColumns()>ML4.PAGE_COLUMNS){
     base.deleteColumns(ML4.PAGE_COLUMNS+1,base.getMaxColumns()-ML4.PAGE_COLUMNS);
   }
-  if(base.getMaxRows()!==42)throw new Error('Шаблон сторінки повинен містити 42 рядки.');
+  if(base.getMaxRows()!==pageRows)throw new Error('Шаблон сторінки повинен містити '+pageRows+' рядків.');
   for(let i=0;i<documents.length;i++){
     const page=base.copyTo(temp);
     page.setName('Аркуш '+String(i+1).padStart(3,'0'));
@@ -362,7 +407,7 @@ function ml5GenerateNativePdf_(source,documents){
   SpreadsheetApp.flush();
   const pdfUrl='https://docs.google.com/spreadsheets/d/'+temp.getId()+'/export?'+ml5PdfQuery_();
   return {url:pdfUrl,temporary:true,
-    note:'PDF відкривається у вкладці Chrome для перегляду й друку. Якщо Chrome завантажить файл замість перегляду, змініть налаштування відкриття PDF у браузері. Тимчасова Google-таблиця TEMP_МЛ_друк_… залишається у «Моєму диску» користувача; її можна згодом видалити. «Шаблон МЛ» і виробничі завдання не змінюються.'};
+    note:'PDF відкривається у вкладці Chrome для перегляду й друку. Якщо Chrome завантажить файл замість перегляду, змініть налаштування відкриття PDF у браузері. Тимчасова Google-таблиця TEMP_МЛ_друк_… залишається у «Моєму диску» користувача; її можна згодом видалити. «Копія Шаблон МЛ», робочий «Шаблон МЛ» і виробничі завдання не змінюються.'};
 }
 function ml4MustSheet_(ss,name){
   const sheet=ss.getSheetByName(name);
@@ -463,4 +508,48 @@ function ml4BuildPlan_(rows,tech,dateIso,shift){
     documents.push(Object.assign({},g,{pressLabel:'Прес '+g.press+'.2'}));
   });
   return {documents,warnings,skippedNoOperator};
+}
+
+/**
+ * ТЕСТОВИЙ ПОПЕРЕДНІЙ ПЕРЕГЛЯД — не видає номерів і не змінює «Журнал МЛ».
+ * Запускати з редактора Apps Script тільки для перевірки нового макета.
+ * Повертає посилання на окремі PDF (звичайний МЛ та дублікат).
+ */
+function ml53PreviewTemplateOnly() {
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  ml5CheckTemplate_(ss,'regular');
+  ml5CheckTemplate_(ss,'duplicate');
+  const sample={
+    dateIso:'2026-11-18', shift:1, pressLabel:'Прес 2.1',
+    mold:'СД-44', product:'СД-44_Павлик_Lula-Бар, А/В',
+    operator:'ТЕСТОВИЙ ОПЕРАТОР'
+  };
+  const regular=ml5GenerateNativePdf_(ss,[Object.assign({},sample,{
+    paper:'00-000',type:'Звичайний'
+  })]);
+  const duplicate=ml5GenerateNativePdf_(ss,[Object.assign({},sample,{
+    paper:'Д1-00-000',type:'Дублікат'
+  })]);
+  const links={regularPdf:regular.url,duplicatePdf:duplicate.url,
+    note:'Тільки макети PDF. Журнал і номери МЛ не змінено; створено дві тимчасові таблиці.'};
+  Logger.log(JSON.stringify(links));
+  return links;
+}
+
+/**
+ * Тільки пробний PDF дубліката: НЕ змінює «Журнал МЛ», номерів НЕ резервує.
+ * Користуватися замість повторного «Створити дублікат» до виправлення друку.
+ */
+function ml531PreviewDuplicateOnly(){
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  ml5CheckTemplate_(ss,'duplicate');
+  const doc={
+    type:'Дублікат', paper:'Д1-00-000',
+    dateIso:'2026-11-18',shift:1,pressLabel:'Прес 2.1',
+    mold:'СД-44',product:'СД-44_Павлик_Lula-Бар, А/В',
+    operator:'ТЕСТОВИЙ ОПЕРАТОР'
+  };
+  const result=ml5GenerateNativePdf_(ss,[doc]);
+  Logger.log('Пробний PDF дубліката (без запису в Журнал МЛ): '+result.url);
+  return result.url;
 }
