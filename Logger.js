@@ -40,6 +40,12 @@ function getOrCreateLogSheet_() {
   }
 
 
+  const expected = ['timestamp', 'type', 'period', 'relevantRows',
+    'kpiReadyRows', 'warnings', 'durationMs', 'status/message'];
+  const actual = sh.getRange(1, 1, 1, 8).getValues()[0];
+  if (expected.some((h, i) => actual[i] !== h)) {
+    throw new Error('AI_LOG headers changed; refusing to append.');
+  }
   return sh;
 }
 
@@ -105,3 +111,4 @@ function logRun_(
 
   }
 }
+

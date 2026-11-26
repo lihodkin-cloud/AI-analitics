@@ -276,20 +276,10 @@ function setAIReportEmailStatus_(
     ]]);
 
 
-  try {
-
-    refreshAIDashboard_();
-
-  } catch (err) {
-
-    console.error(
-      'DASHBOARD REFRESH ERROR: ' +
-      err.message
-    );
-  }
+  aiMarkDashboardDirty_();
 }
 
-function sendStoredAIReportEmail_(
+function sendStoredAIReportEmailUnlocked_(
   reportKey
 ) {
 
@@ -325,8 +315,7 @@ function sendStoredAIReportEmail_(
    */
 
   if (
-    report.emailStatus ===
-    'SENT'
+    ['SENT', 'SENDING', 'REVIEW', 'ERROR'].includes(report.emailStatus)
   ) {
 
     return {
@@ -335,6 +324,10 @@ function sendStoredAIReportEmail_(
     };
   }
 
+
+  if (report.status !== 'OK' || !String(report.aiText || '').trim()) {
+    return {status: 'INVALID_REPORT'};
+  }
 
   const recipients =
     getAIReportEmailRecipients_();
@@ -384,6 +377,8 @@ function sendStoredAIReportEmail_(
       report
     );
 
+
+  setAIReportEmailStatus_(report.row, 'SENDING', '', recipients.join(', '));
 
   try {
 
@@ -436,7 +431,7 @@ function sendStoredAIReportEmail_(
 
     setAIReportEmailStatus_(
       report.row,
-      'ERROR',
+      'REVIEW',
       '',
       recipients.join(', ')
     );
@@ -446,102 +441,33 @@ function sendStoredAIReportEmail_(
   }
 }
 
-function deliverPendingAIReportEmails_() {
-
-  if (
-    CFG.AI.EMAIL_ENABLED !==
-    true
-  ) {
-    return;
-  }
-
-
-  const sheet =
-    getOrCreateAIReportSheet_();
-
-
-  const lastRow =
-    sheet.getLastRow();
-
-
-  if (
-    lastRow < 2
-  ) {
-    return;
-  }
-
-
-  const rows =
-    sheet
-      .getRange(
-        2,
-        1,
-        lastRow - 1,
-        20
-      )
-      .getValues();
-
-
-  rows.forEach(
-    row => {
-
-      const reportKey =
-        row[2];
-
-
-      const emailStatus =
-        row[17];
-
-
-      /*
-       * Старі історичні рядки
-       * з порожнім статусом
-       * НЕ надсилаємо.
-       */
-
-      if (
-        emailStatus !==
-          'PENDING' &&
-        emailStatus !==
-          'ERROR' &&
-        emailStatus !==
-          'WAITING_QUOTA'
-      ) {
-
-        return;
+function deliverPendingAIReportEmailsUnlocked_() {
+  const summary = {attempted: 0, sent: 0};
+  if (CFG.AI.EMAIL_ENABLED !== true) return summary;
+  const sheet = getOrCreateAIReportSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return summary;
+  const rows = sheet.getRange(2, 1, lastRow - 1, 20).getValues();
+  for (const row of rows) {
+    if (summary.attempted >= aiReliabilityConfig_().maxEmails || !aiHasTime_(30000)) break;
+    // An interrupted SENDING or REVIEW must be reconciled before explicit requeue.
+    if (!['PENDING', 'WAITING_QUOTA'].includes(row[17]) ||
+        row[16] !== 'OK' || !String(row[7] || '').trim()) continue;
+    summary.attempted++;
+    try {
+      const result = sendStoredAIReportEmailUnlocked_(row[2]);
+      if (result.status === 'SENT') summary.sent++;
+      aiTechnicalEvent_(row[2], 'EMAIL_' + result.status, {});
+      if (result.status === 'WAITING_QUOTA') {
+        summary.waitingQuota = true;
+        break;
       }
-
-
-      try {
-
-        const result =
-          sendStoredAIReportEmail_(
-            reportKey
-          );
-
-
-        console.log(
-          'EMAIL ' +
-          reportKey +
-          ': ' +
-          result.status
-        );
-
-
-      } catch (err) {
-
-        console.error(
-          'EMAIL ' +
-          reportKey +
-          ': ' +
-          err.message
-        );
-      }
-
+    } catch (err) {
+      aiRecordFailure_(row[2], aiFailure_('EMAIL_REVIEW', false));
     }
-  );
+  }
+  return summary;
 }
-
 function queueAIReportEmail_(
   reportKey
 ) {
@@ -574,3 +500,14 @@ function queueAIReportEmail_(
     reportKey
   );
 }
+
+function sendStoredAIReportEmail_(reportKey) {
+  let result;
+  aiWithSchedulerLock_(function() { result = sendStoredAIReportEmailUnlocked_(reportKey); });
+  return result;
+}
+
+function deliverPendingAIReportEmails_() {
+  aiWithSchedulerLock_(deliverPendingAIReportEmailsUnlocked_);
+}
+
