@@ -1,6 +1,6 @@
 # Bounded scheduler phases
 
-Prepared on 2026-11-26. Production is unchanged. The revised generation, mail and dashboard phases have now completed successfully in an isolated Apps Script project.
+Prepared on 2026-11-26. The owner reported production source installation and trigger setup completed on 2026-11-26. The revised generation, mail and dashboard phases have now completed successfully in an isolated Apps Script project.
 
 ## Problem
 
@@ -27,7 +27,7 @@ An isolated Apps Script run reached the six-minute execution limit after saving 
 4. Run runAIScheduler manually. If mail was pending, expect EMAIL_PHASE_FINISHED without dashboard output or AI generation. Otherwise expect at most one generated report and FINISHED. Newly generated report mail waits for the next run.
 5. Run runAIScheduler again to verify the next phase. Existing SENT/SENDING rows must not be resent.
 6. Run runAIDashboardRefresh separately. It should render once and clear the dirty flag. A second run without changes should do no rendering.
-7. After successful real retests, update the production project and install the revised trigger arrangement. The revised phases have been retested successfully. Production installation and trigger verification are still pending.
+7. After successful real retests, update the production project and install the revised trigger arrangement. The revised phases have been retested successfully. Production installation was subsequently reported complete; verification of the first scheduled executions remains pending.
 
 ## Validation
 
@@ -47,4 +47,10 @@ Confirmed in an isolated copied project:
 - A separate dashboard invocation completed and logged REFRESHED. The user confirmed both shift cards were visible.
 - A subsequent master invocation generated one missing report, saved it as OK/PENDING, logged SAVED and FINISHED, and completed without inline dashboard rendering or mail delivery.
 
-Automated HTTP error and cooldown cases are covered by the 48-test suite; real HTTP failure injection was not performed. Production code and triggers remain unchanged. The generic acceptance record deliberately omits internal source links, report identifiers and recipient addresses.
+Automated HTTP error and cooldown cases are covered by the 48-test suite; real HTTP failure injection was not performed. The owner subsequently reported installing the code and both triggers in production. A manual production generation run was independently verified in the report store and control log; scheduled executions are not yet verified. The generic acceptance record deliberately omits internal source links, report identifiers and recipient addresses.
+
+## Production installation, 2026-11-26
+
+The owner reported transferring the reviewed source into the production project, configuring the administrator property, confirming the existing API-key and report-recipient properties, and running installAISchedulerTrigger. The intended trigger intervals are the existing thirty-minute master scheduler and ten-minute dashboard refresh.
+
+A manual production master invocation was verified to save a missing report with OK/PENDING and log SAVED and FINISHED. Trigger configuration is based on the owner's confirmation, not a direct trigger inventory. The first scheduled master execution, queued production delivery and scheduled dashboard execution remain unverified. The source branch remains separate from main while the pull request is open.

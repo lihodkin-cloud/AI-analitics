@@ -1,10 +1,10 @@
 # API failure control and seven-day recovery
 
-Prepared and tested on 2026-11-26 (Europe/Kyiv). Production deployment has not been performed.
+Prepared and tested on 2026-11-26 (Europe/Kyiv). Production source installation and trigger setup were reported completed by the owner on 2026-11-26; a manual production generation run was verified. The first scheduled executions remain unverified.
 
 ## Latest revision
 
-The initial combined Apps Script run timed out. See [Bounded scheduler phases](timeout-fix.md) for the correction and completed isolated Apps Script phase checks. Production deployment is still pending.
+The initial combined Apps Script run timed out. See [Bounded scheduler phases](timeout-fix.md) for the correction and completed isolated Apps Script phase checks. Production installation is complete as reported by the owner; scheduled execution verification remains pending.
 
 ## Behavior
 
