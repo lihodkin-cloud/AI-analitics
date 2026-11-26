@@ -4,7 +4,7 @@ Prepared and tested on 2026-11-26 (Europe/Kyiv). Production deployment has not b
 
 ## Latest revision
 
-The initial combined Apps Script run timed out. See [Bounded scheduler phases](timeout-fix.md) for the correction and required retest. Production deployment is still pending.
+The initial combined Apps Script run timed out. See [Bounded scheduler phases](timeout-fix.md) for the correction and completed isolated Apps Script phase checks. Production deployment is still pending.
 
 ## Behavior
 
