@@ -1,7 +1,30 @@
+// Context is scoped to one lock-protected invocation, never to a later trigger run.
+var AI_RUN_CONTEXT_ = null;
+
 // Persistent retry state contains technical metadata only; never API bodies or prompts.
 function aiReliabilityConfig_() {
   return { retryMs: 30 * 60000, maxRetryMs: 6 * 3600000,
-    alertMs: 6 * 3600000, maxReports: 2, budgetMs: 210000 };
+    alertMs: 6 * 3600000, maxReports: 1, maxEmails: 2, budgetMs: 180000 };
+}
+
+function aiHasTime_(reserveMs) {
+  return !AI_RUN_CONTEXT_ ||
+    Date.now() - AI_RUN_CONTEXT_.startedAt + (reserveMs || 0) < aiReliabilityConfig_().budgetMs;
+}
+
+function aiMarkDashboardDirty_() {
+  PropertiesService.getScriptProperties().setProperty('AI_DASHBOARD_DIRTY', '1');
+}
+
+// Heavy rendering has a separate invocation and never runs between SENDING and MailApp.
+function runAIDashboardRefresh() {
+  aiWithSchedulerLock_(function() {
+    const props = PropertiesService.getScriptProperties();
+    if (!props.getProperty('AI_DASHBOARD_DIRTY')) return;
+    refreshAIDashboard_();
+    props.deleteProperty('AI_DASHBOARD_DIRTY');
+    aiTechnicalEvent_('DASHBOARD', 'REFRESHED', {});
+  });
 }
 
 function aiReadState_(key) {
@@ -93,9 +116,10 @@ function aiRunTarget_(key, buildResult) {
 function aiWithSchedulerLock_(work) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
+  AI_RUN_CONTEXT_ = {startedAt: Date.now(), rawRows: null, sourceTargets: null, reportSheet: null};
   try { work(); }
   catch (err) { aiRecordFailure_('SCHEDULER', err); throw err; }
-  finally { lock.releaseLock(); }
+  finally { AI_RUN_CONTEXT_ = null; lock.releaseLock(); }
 }
 
 // Only old retry entries are pruned; the seven-day scan rechecks late source data.

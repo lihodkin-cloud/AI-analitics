@@ -69,6 +69,7 @@ function extractOpenAIText_(
 }
 
 function callOpenAI_(instructions, input) {
+  if (!aiHasTime_(60000)) throw aiFailure_('RUN_BUDGET', true);
   const circuit = aiReadState_('AI_API_CIRCUIT');
   if (Date.now() < (circuit.nextAt || 0)) throw aiFailure_('API_COOLDOWN', true);
   let status = 0;

@@ -26,8 +26,11 @@ function aiRecoveryTargets_(now, dailyOnly) {
   const targets = getDueDailyReportTargets_(now).map(t => ({
     key: buildDailyAutomationKey_(t.date, t.shift),
     build: function() {
+      // Empty date/shift pairs need no full metrics or traceability computation.
+      if (!aiSourceHasTarget_(t.date, t.shift)) return null;
       const pkg = buildDailyReportPackage_(t.date, t.shift);
       if (!isDailyReportReady_(pkg)) return null;
+      if (!aiHasTime_(60000)) return null;
       return analyzeDailyReportPackage_(pkg);
     }
   }));
@@ -46,6 +49,15 @@ function aiRecoveryTargets_(now, dailyOnly) {
   return targets;
 }
 
+function aiSourceHasTarget_(date, shift) {
+  let index = AI_RUN_CONTEXT_ && AI_RUN_CONTEXT_.sourceTargets;
+  if (!index) {
+    index = new Set(readRawTaskRows_().map(r => r.dateKey + '|' + r.shift));
+    if (AI_RUN_CONTEXT_) AI_RUN_CONTEXT_.sourceTargets = index;
+  }
+  return index.has(date + '|' + shift);
+}
+
 function aiRunRecovery_(dailyOnly) {
   const started = Date.now();
   const cfg = aiReliabilityConfig_();
@@ -53,7 +65,7 @@ function aiRunRecovery_(dailyOnly) {
   aiPruneRetryState_();
   const targets = aiRecoveryTargets_(new Date(), dailyOnly);
   for (const target of targets) {
-    if (attempted >= cfg.maxReports || Date.now() - started >= cfg.budgetMs) break;
+    if (attempted >= cfg.maxReports || Date.now() - started >= cfg.budgetMs || !aiHasTime_(60000)) break;
     if (aiRunTarget_(target.key, target.build)) attempted++;
   }
   aiTechnicalEvent_('SCHEDULER', 'FINISHED', {attempted: attempted, scanned: targets.length});
@@ -90,9 +102,15 @@ function testPeriodAISchedulerStatus() {
 
 function runAIScheduler() {
   aiWithSchedulerLock_(function() {
+    // Drain existing mail first; generation and sending use separate executions.
+    let delivery;
+    try { delivery = deliverPendingAIReportEmailsUnlocked_(); }
+    catch (err) { aiRecordFailure_('EMAIL_DELIVERY', err); return; }
+    if (delivery && delivery.attempted > 0 && !delivery.waitingQuota) {
+      aiTechnicalEvent_('SCHEDULER', 'EMAIL_PHASE_FINISHED', delivery);
+      return;
+    }
     aiRunRecovery_(false);
-    try { deliverPendingAIReportEmailsUnlocked_(); }
-    catch (err) { aiRecordFailure_('EMAIL_DELIVERY', err); }
   });
 }
 
@@ -346,7 +364,8 @@ function installAISchedulerTrigger() {
   const handlers = [
 
     'runDailyAIScheduler',
-    'runAIScheduler'
+    'runAIScheduler',
+    'runAIDashboardRefresh'
 
   ];
 
@@ -388,6 +407,8 @@ function installAISchedulerTrigger() {
         .SCHEDULER_MINUTES
     )
     .create();
+
+  ScriptApp.newTrigger('runAIDashboardRefresh').timeBased().everyMinutes(10).create();
 
 
   console.log(

@@ -36,6 +36,7 @@ function harness() {
       })
     };}},
     logRun_: (...args) => events.push(args),
+    readRawTaskRows_: () => [],
     getStoredAIReport_: key => reports[key] || null,
     saveAIReport_: r => {saved.push(r); reports[ctx.buildAIReportKey_(r)] = {status: 'OK', aiText: r.aiText};},
     buildAIReportKey_: r => r.reportType + '|' + r.date + '|SHIFT_' + r.shift
@@ -204,7 +205,7 @@ test('automatic recovery limits work per execution', () => {
   const h = harness(); let count = 0;
   h.ctx.aiRecoveryTargets_ = () => Array.from({length: 10}, (_, i) => ({key: String(i), build() {}}));
   h.ctx.aiRunTarget_ = () => {count++; return true;};
-  h.ctx.aiRunRecovery_(false); assert.equal(count, 2);
+  h.ctx.aiRunRecovery_(false); assert.equal(count, 1);
 });
 test('all repository JavaScript files parse in Apps Script V8 syntax', () => {
   for (const file of fs.readdirSync(root).filter(f => f.endsWith('.js'))) {
@@ -254,4 +255,133 @@ test('actual recovery does not call AI for empty source or already saved reports
   h.ctx.analyzeDailyReportPackage_ = () => {calls++; throw Error('must not call');};
   h.ctx.aiRunRecovery_(true);
   assert.equal(calls, 0); assert.equal(h.saved.length, 0);
+  assert.ok(!h.events.some(e => e[4] === 'ERROR'));
+});
+
+test('regression: report save marks dashboard dirty without rendering it', () => {
+  const h = harness();
+  vm.runInContext(fs.readFileSync(path.join(root, 'AIReportStore.js'), 'utf8'), h.ctx);
+  let written, renders = 0;
+  h.ctx.refreshAIDashboard_ = () => {renders++; throw Error('expensive render');};
+  h.ctx.getOrCreateAIReportSheet_ = () => ({
+    getLastRow: () => 1,
+    getRange: () => ({
+      setValues: v => {written = v[0];},
+      setWrap() {return this;}, setVerticalAlignment() {return this;}
+    })
+  });
+  h.ctx.findAIReportRow_ = () => null;
+  h.ctx.saveAIReport_({reportType: 'DAILY', date: '2026-11-25', shift: 1, aiText: 'ready'});
+  assert.equal(written[16], 'OK');
+  assert.equal(h.state.AI_DASHBOARD_DIRTY, '1');
+  assert.equal(renders, 0);
+});
+test('regression: SENDING and SENT writes never render dashboard before or after MailApp', () => {
+  const h = harness(), order = [];
+  h.state.AI_REPORT_EMAILS = 'a@example.com';
+  h.reports.a = {row: 2, reportKey: 'a', status: 'OK', aiText: 'text', emailStatus: 'PENDING'};
+  h.ctx.refreshAIDashboard_ = () => {throw Error('must not render');};
+  h.ctx.getOrCreateAIReportSheet_ = () => ({getRange: () => ({
+    setValues: v => {h.reports.a.emailStatus = v[0][0]; order.push(v[0][0]);}
+  })});
+  h.ctx.MailApp.sendEmail = () => {order.push('MAIL');};
+  h.ctx.sendStoredAIReportEmail_('a');
+  assert.deepEqual(order, ['SENDING', 'MAIL', 'SENT']);
+});
+test('regression: master drains mail and does not generate or render in that execution', () => {
+  const h = harness(), order = [];
+  h.ctx.deliverPendingAIReportEmailsUnlocked_ = () => {order.push('mail'); return {attempted: 1, sent: 1};};
+  h.ctx.aiRunRecovery_ = () => {order.push('generate');};
+  h.ctx.refreshAIDashboard_ = () => {order.push('render');};
+  h.ctx.runAIScheduler();
+  assert.deepEqual(order, ['mail']);
+  assert.ok(h.events.some(e => e[4] === 'EMAIL_PHASE_FINISHED'));
+});
+test('regression: master with no eligible mail generates without rendering', () => {
+  const h = harness(), order = [];
+  h.ctx.deliverPendingAIReportEmailsUnlocked_ = () => {order.push('mail'); return {attempted: 0, sent: 0};};
+  h.ctx.aiRunRecovery_ = () => {order.push('generate');};
+  h.ctx.refreshAIDashboard_ = () => {order.push('render');};
+  h.ctx.runAIScheduler();
+  assert.deepEqual(order, ['mail', 'generate']);
+});
+test('separate dashboard refresh renders once and clears dirty only on success', () => {
+  const h = harness(); let renders = 0;
+  h.state.AI_DASHBOARD_DIRTY = '1';
+  h.ctx.refreshAIDashboard_ = () => {renders++;};
+  h.ctx.runAIDashboardRefresh(); h.ctx.runAIDashboardRefresh();
+  assert.equal(renders, 1); assert.equal(h.state.AI_DASHBOARD_DIRTY, undefined);
+  h.state.AI_DASHBOARD_DIRTY = '1';
+  h.ctx.refreshAIDashboard_ = () => {throw Error('render failure');};
+  assert.throws(() => h.ctx.runAIDashboardRefresh());
+  assert.equal(h.state.AI_DASHBOARD_DIRTY, '1');
+});
+test('mail phase is bounded and skips interrupted SENDING', () => {
+  const h = harness(), calls = [];
+  const rows = ['SENDING', 'SENT', 'PENDING', 'WAITING_QUOTA', 'PENDING'].map((status, i) => {
+    const r = Array(20).fill(''); r[2] = 'key' + i; r[7] = 'text'; r[16] = 'OK'; r[17] = status; return r;
+  });
+  h.ctx.getOrCreateAIReportSheet_ = () => ({getLastRow: () => rows.length + 1,
+    getRange: () => ({getValues: () => rows})});
+  h.ctx.sendStoredAIReportEmailUnlocked_ = key => {calls.push(key); return {status: 'SENT'};};
+  const result = h.ctx.deliverPendingAIReportEmailsUnlocked_();
+  assert.deepEqual(calls, ['key2', 'key3']);
+  assert.equal(result.attempted, 2); assert.equal(result.sent, 2);
+});
+test('source snapshot is read once per lock-protected execution and never across executions', () => {
+  const h = harness(); let reads = 0;
+  vm.runInContext(fs.readFileSync(path.join(root, 'DataReader.js'), 'utf8'), h.ctx);
+  const headers = Array(21).fill('');
+  Object.assign(headers, {1:'дата', 2:'зміна', 4:'операція', 5:'верстат',
+    6:'№ замовлення', 8:'виріб', 10:'норма', 11:'план', 12:'факт',
+    14:'план', 15:'факт', 17:'факт', 18:'% виконання', 19:'Виконавець',
+    20:'Причина відхилення (заповнює майстер цеху)'});
+  const row = Array(21).fill('');
+  row[1] = '2026-11-25'; row[2] = 1; row[4] = 'П'; row[8] = 'product';
+  h.ctx.getSourceSheet_ = () => ({getLastRow: () => 4, getRange: (start) => ({
+    getValues: () => {if (start === 3) return [headers]; reads++; return [row];}
+  })});
+  h.ctx.aiWithSchedulerLock_(() => {
+    assert.equal(h.ctx.readRawTaskRows_().length, 1);
+    assert.equal(h.ctx.readRawTaskRows_().length, 1);
+    assert.equal(h.ctx.aiSourceHasTarget_('2026-11-25', 1), true);
+    assert.equal(h.ctx.aiSourceHasTarget_('2026-11-22', 1), false);
+  });
+  assert.equal(reads, 1); assert.equal(h.ctx.AI_RUN_CONTEXT_, null);
+  h.ctx.aiWithSchedulerLock_(() => h.ctx.readRawTaskRows_());
+  assert.equal(reads, 2);
+});
+test('empty shifts bypass expensive package construction using one source index', () => {
+  const h = harness(); let reads = 0, builds = 0;
+  h.ctx.readRawTaskRows_ = () => {reads++; return [];};
+  h.ctx.buildDailyReportPackage_ = () => {builds++; throw Error('must not build');};
+  h.ctx.aiWithSchedulerLock_(() => {
+    const targets = h.ctx.aiRecoveryTargets_(now('2026-11-26T16:00:00Z'), true);
+    for (const t of targets) assert.equal(t.build(), null);
+  });
+  assert.equal(reads, 1); assert.equal(builds, 0);
+});
+test('API refuses a new request after time budget with no global API failure state', () => {
+  const h = harness();
+  h.ctx.AI_RUN_CONTEXT_ = {startedAt: Date.now() - 121000};
+  assert.throws(() => h.ctx.callOpenAI_('', ''), {code: 'RUN_BUDGET'});
+  assert.equal(h.fetches(), 0); assert.equal(h.state.AI_API_CIRCUIT, undefined);
+});
+test('insufficient remaining budget starts no email and preserves pending work', () => {
+  const h = harness(); let calls = 0;
+  h.ctx.AI_RUN_CONTEXT_ = {startedAt: Date.now() - 151000};
+  const row = Array(20).fill(''); row[2] = 'key'; row[7] = 'text'; row[16] = 'OK'; row[17] = 'PENDING';
+  h.ctx.getOrCreateAIReportSheet_ = () => ({getLastRow: () => 2,
+    getRange: () => ({getValues: () => [row]})});
+  h.ctx.sendStoredAIReportEmailUnlocked_ = () => {calls++; return {status:'SENT'};};
+  assert.equal(h.ctx.deliverPendingAIReportEmailsUnlocked_().attempted, 0);
+  assert.equal(calls, 0);
+});
+
+test('mail quota exhaustion does not starve report generation', () => {
+  const h = harness(); let generated = 0;
+  h.ctx.deliverPendingAIReportEmailsUnlocked_ = () => ({attempted: 1, sent: 0, waitingQuota: true});
+  h.ctx.aiRunRecovery_ = () => {generated++;};
+  h.ctx.runAIScheduler();
+  assert.equal(generated, 1);
 });

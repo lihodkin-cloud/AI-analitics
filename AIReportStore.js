@@ -2,6 +2,10 @@
 
 function getOrCreateAIReportSheet_() {
 
+  if (AI_RUN_CONTEXT_ && AI_RUN_CONTEXT_.reportSheet) {
+    return AI_RUN_CONTEXT_.reportSheet;
+  }
+
   const ss =
     getAnalyticsSpreadsheet_();
 
@@ -26,6 +30,7 @@ function getOrCreateAIReportSheet_() {
   );
 
 
+  if (AI_RUN_CONTEXT_) AI_RUN_CONTEXT_.reportSheet = sheet;
   return sheet;
 }
 
@@ -330,17 +335,7 @@ function saveAIReport_(
       'top'
     );
 
-  try {
-
-    refreshAIDashboard_();
-
-  } catch (err) {
-
-    console.error(
-       'DASHBOARD REFRESH ERROR: ' +
-      err.message
-    );
-  }
+  aiMarkDashboardDirty_();
 
   return {
 

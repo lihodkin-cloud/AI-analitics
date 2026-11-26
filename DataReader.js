@@ -2,6 +2,10 @@
 
 function readRawTaskRows_() {
 
+  if (AI_RUN_CONTEXT_ && AI_RUN_CONTEXT_.rawRows !== null) {
+    return AI_RUN_CONTEXT_.rawRows;
+  }
+
   const sh =
     getSourceSheet_();
 
@@ -25,6 +29,7 @@ function readRawTaskRows_() {
     CFG.FIRST_DATA_ROW
   ) {
 
+    if (AI_RUN_CONTEXT_) AI_RUN_CONTEXT_.rawRows = [];
     return [];
   }
 
@@ -199,5 +204,6 @@ function readRawTaskRows_() {
   );
 
 
+  if (AI_RUN_CONTEXT_) AI_RUN_CONTEXT_.rawRows = out;
   return out;
 }
