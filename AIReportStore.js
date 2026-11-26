@@ -115,6 +115,8 @@ function saveAIReport_(
   result
 ) {
 
+  if (!String(result.aiText || '').trim()) throw aiFailure_('EMPTY_REPORT', false);
+
   const sheet =
     getOrCreateAIReportSheet_();
 
@@ -430,6 +432,14 @@ function ensureAIReportHeaders_(
         .getRange(1, 1)
         .getValue() || ''
     ).trim();
+
+  if (sheet.getLastRow() > 0) {
+    const actual = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+    if (headers.some((h, i) => actual[i] !== h)) {
+      throw aiFailure_('REPORT_HEADERS_CHANGED', false);
+    }
+    return;
+  }
 
 
   /*

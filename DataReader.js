@@ -8,6 +8,17 @@ function readRawTaskRows_() {
   const lastRow =
     sh.getLastRow();
 
+  const headers = sh.getRange(CFG.HEADER_ROW, 1, 1, CFG.LAST_READ_COLUMN).getValues()[0];
+  const expected = {2: 'дата', 3: 'зміна', 5: 'операція', 6: 'верстат',
+    7: '№ замовлення', 9: 'виріб', 11: 'норма', 12: 'план', 13: 'факт',
+    15: 'план', 16: 'факт', 18: 'факт', 19: '% виконання', 20: 'Виконавець',
+    21: 'Причина відхилення (заповнює майстер цеху)'};
+  Object.keys(expected).forEach(col => {
+    if (String(headers[Number(col) - 1] || '').trim() !== expected[col]) {
+      throw aiFailure_('SOURCE_HEADERS_CHANGED', false);
+    }
+  });
+
 
   if (
     lastRow <

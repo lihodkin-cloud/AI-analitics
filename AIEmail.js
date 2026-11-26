@@ -289,7 +289,7 @@ function setAIReportEmailStatus_(
   }
 }
 
-function sendStoredAIReportEmail_(
+function sendStoredAIReportEmailUnlocked_(
   reportKey
 ) {
 
@@ -325,8 +325,7 @@ function sendStoredAIReportEmail_(
    */
 
   if (
-    report.emailStatus ===
-    'SENT'
+    ['SENT', 'SENDING', 'REVIEW', 'ERROR'].includes(report.emailStatus)
   ) {
 
     return {
@@ -335,6 +334,10 @@ function sendStoredAIReportEmail_(
     };
   }
 
+
+  if (report.status !== 'OK' || !String(report.aiText || '').trim()) {
+    return {status: 'INVALID_REPORT'};
+  }
 
   const recipients =
     getAIReportEmailRecipients_();
@@ -384,6 +387,8 @@ function sendStoredAIReportEmail_(
       report
     );
 
+
+  setAIReportEmailStatus_(report.row, 'SENDING', '', recipients.join(', '));
 
   try {
 
@@ -436,7 +441,7 @@ function sendStoredAIReportEmail_(
 
     setAIReportEmailStatus_(
       report.row,
-      'ERROR',
+      'REVIEW',
       '',
       recipients.join(', ')
     );
@@ -446,7 +451,7 @@ function sendStoredAIReportEmail_(
   }
 }
 
-function deliverPendingAIReportEmails_() {
+function deliverPendingAIReportEmailsUnlocked_() {
 
   if (
     CFG.AI.EMAIL_ENABLED !==
@@ -503,8 +508,6 @@ function deliverPendingAIReportEmails_() {
         emailStatus !==
           'PENDING' &&
         emailStatus !==
-          'ERROR' &&
-        emailStatus !==
           'WAITING_QUOTA'
       ) {
 
@@ -515,7 +518,7 @@ function deliverPendingAIReportEmails_() {
       try {
 
         const result =
-          sendStoredAIReportEmail_(
+          sendStoredAIReportEmailUnlocked_(
             reportKey
           );
 
@@ -530,6 +533,7 @@ function deliverPendingAIReportEmails_() {
 
       } catch (err) {
 
+        aiRecordFailure_(reportKey, aiFailure_('EMAIL_REVIEW', false));
         console.error(
           'EMAIL ' +
           reportKey +
@@ -574,3 +578,14 @@ function queueAIReportEmail_(
     reportKey
   );
 }
+
+function sendStoredAIReportEmail_(reportKey) {
+  let result;
+  aiWithSchedulerLock_(function() { result = sendStoredAIReportEmailUnlocked_(reportKey); });
+  return result;
+}
+
+function deliverPendingAIReportEmails_() {
+  aiWithSchedulerLock_(deliverPendingAIReportEmailsUnlocked_);
+}
+
