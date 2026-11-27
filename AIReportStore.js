@@ -2,6 +2,10 @@
 
 function getOrCreateAIReportSheet_() {
 
+  if (AI_RUN_CONTEXT_ && AI_RUN_CONTEXT_.reportSheet) {
+    return AI_RUN_CONTEXT_.reportSheet;
+  }
+
   const ss =
     getAnalyticsSpreadsheet_();
 
@@ -26,6 +30,7 @@ function getOrCreateAIReportSheet_() {
   );
 
 
+  if (AI_RUN_CONTEXT_) AI_RUN_CONTEXT_.reportSheet = sheet;
   return sheet;
 }
 
@@ -114,6 +119,8 @@ function buildAIReportKey_(
 function saveAIReport_(
   result
 ) {
+
+  if (!String(result.aiText || '').trim()) throw aiFailure_('EMPTY_REPORT', false);
 
   const sheet =
     getOrCreateAIReportSheet_();
@@ -328,17 +335,7 @@ function saveAIReport_(
       'top'
     );
 
-  try {
-
-    refreshAIDashboard_();
-
-  } catch (err) {
-
-    console.error(
-       'DASHBOARD REFRESH ERROR: ' +
-      err.message
-    );
-  }
+  aiMarkDashboardDirty_();
 
   return {
 
@@ -430,6 +427,14 @@ function ensureAIReportHeaders_(
         .getRange(1, 1)
         .getValue() || ''
     ).trim();
+
+  if (sheet.getLastRow() > 0) {
+    const actual = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+    if (headers.some((h, i) => actual[i] !== h)) {
+      throw aiFailure_('REPORT_HEADERS_CHANGED', false);
+    }
+    return;
+  }
 
 
   /*
